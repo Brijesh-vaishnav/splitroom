@@ -84,21 +84,15 @@
   }
 
   async function loadRoom() {
-    // Load room
-    const { data: r } = await db.from('rooms').select('*').eq('id', roomId).single();
-    if (!r) { window.location.href = '/dashboard.html'; return; }
-    room = r;
+    // Load room via RPC (bypasses RLS)
+    const { data: roomData } = await db.rpc('get_room_data', { rid: roomId });
+    if (!roomData) { window.location.href = '/dashboard.html'; return; }
 
-    // Verify membership
-    const { data: membership } = await db.from('room_members')
-      .select('id').eq('room_id', roomId).eq('user_id', currentUser.id).single();
-    if (!membership) { window.location.href = '/dashboard.html'; return; }
+    const parsed = typeof roomData === 'string' ? JSON.parse(roomData) : roomData;
+    if (!parsed || parsed.error) { window.location.href = '/dashboard.html'; return; }
 
-    // Load members with profiles
-    const { data: mems } = await db.from('room_members')
-      .select('*, profiles(id, username)')
-      .eq('room_id', roomId);
-    members = mems || [];
+    room = parsed.room;
+    members = parsed.members;
 
     // Load payments
     const { data: pays } = await db.from('payments')
