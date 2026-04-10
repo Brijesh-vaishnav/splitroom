@@ -20,7 +20,7 @@ async function getUser() {
 }
 
 async function getProfile(userId) {
-  const { data } = await db.from('profiles').select('*').eq('id', userId).single();
+  const { data } = await db.from('profiles').select('*').eq('id', userId).maybeSingle();
   return data;
 }
 
