@@ -81,8 +81,8 @@
 
     setLoading(btn, true, 'Sign in');
 
-    // We store users with username@splitroom.internal as fake email
-    const fakeEmail = `${username}@splitroom.internal`;
+    // We store users with a fake but valid-format email
+    const fakeEmail = `${username}@splitroom.app`;
     const { error } = await db.auth.signInWithPassword({ email: fakeEmail, password });
 
     if (error) {
@@ -112,7 +112,7 @@
 
     setLoading(btn, true, 'Create account');
 
-    const fakeEmail = `${username}@splitroom.internal`;
+    const fakeEmail = `${username}@splitroom.app`;
     const { error } = await db.auth.signUp({
       email: fakeEmail,
       password,
