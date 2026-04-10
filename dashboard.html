@@ -178,24 +178,16 @@
 
     setLoading(btn, true, 'Join room');
 
-    const { data: room } = await db.from('rooms').select('id, name').eq('invite_code', code).single();
-    if (!room) {
+    const { data: room, error } = await db.rpc('join_room', { code });
+
+    if (error || !room || room.error) {
       showAlert(alert, 'Room not found. Check the invite code.');
       setLoading(btn, false, 'Join room');
       return;
     }
 
-    // Check already a member
-    const { data: existing } = await db.from('room_members')
-      .select('id').eq('room_id', room.id).eq('user_id', currentUser.id).single();
-
-    if (existing) {
-      window.location.href = `room.html?id=${room.id}`;
-      return;
-    }
-
-    await db.from('room_members').insert({ room_id: room.id, user_id: currentUser.id });
-    window.location.href = `room.html?id=${room.id}`;
+    const roomData = typeof room === 'string' ? JSON.parse(room) : room;
+    window.location.href = `room.html?id=${roomData.id}`;
   }
 
   function openCreateModal() {
