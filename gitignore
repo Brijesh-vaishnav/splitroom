@@ -1,0 +1,14 @@
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.production
+.env*.local
+supabase_schema.sql
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

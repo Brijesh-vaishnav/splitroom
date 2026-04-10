@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Splitroom — Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-brand">
+    <span class="dot"></span> Splitroom
+  </div>
+  <div class="navbar-right">
+    <span class="nav-username" id="nav-username"></span>
+    <button class="btn btn-ghost btn-sm" onclick="handleLogout()">Sign out</button>
+  </div>
+</nav>
+
+<div class="container-wide">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Your rooms</div>
+      <div class="page-subtitle">Create a room or join one with an invite code</div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" onclick="openJoinModal()">Join room</button>
+      <button class="btn btn-primary" onclick="openCreateModal()">+ New room</button>
+    </div>
+  </div>
+
+  <div id="rooms-container">
+    <div class="loading-screen"><span class="spinner"></span></div>
+  </div>
+</div>
+
+<!-- Create room modal -->
+<div class="modal-backdrop" id="create-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Create a room</span>
+      <button class="modal-close" onclick="closeModal('create-modal')">×</button>
+    </div>
+    <div id="create-alert" class="alert"></div>
+    <div class="form-group">
+      <label class="form-label">Room name</label>
+      <input class="form-input" type="text" id="room-name" placeholder="e.g. Netflix squad, Flat mates" />
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+      <button class="btn btn-secondary" onclick="closeModal('create-modal')">Cancel</button>
+      <button class="btn btn-primary" id="create-btn" onclick="handleCreateRoom()">Create room</button>
+    </div>
+  </div>
+</div>
+
+<!-- Join room modal -->
+<div class="modal-backdrop" id="join-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Join a room</span>
+      <button class="modal-close" onclick="closeModal('join-modal')">×</button>
+    </div>
+    <div id="join-alert" class="alert"></div>
+    <div class="form-group">
+      <label class="form-label">Invite code</label>
+      <input class="form-input" type="text" id="invite-code" placeholder="e.g. A3X9QR" maxlength="6"
+        style="text-transform:uppercase;letter-spacing:0.15em;font-family:monospace;font-size:16px;" />
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+      <button class="btn btn-secondary" onclick="closeModal('join-modal')">Cancel</button>
+      <button class="btn btn-primary" id="join-btn" onclick="handleJoinRoom()">Join room</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+  let currentUser = null;
+  let currentProfile = null;
+
+  async function init() {
+    currentUser = await requireAuth();
+    if (!currentUser) return;
+    currentProfile = await getProfile(currentUser.id);
+    document.getElementById('nav-username').textContent = '@' + currentProfile.username;
+    loadRooms();
+  }
+
+  async function loadRooms() {
+    const container = document.getElementById('rooms-container');
+
+    // Get rooms the user is a member of
+    const { data: memberships } = await db
+      .from('room_members')
+      .select('room_id, joined_at')
+      .eq('user_id', currentUser.id);
+
+    if (!memberships || memberships.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div style="font-size:32px;">⬡</div>
+          <p>No rooms yet. Create one or join with an invite code.</p>
+        </div>`;
+      return;
+    }
+
+    const roomIds = memberships.map(m => m.room_id);
+    const { data: rooms } = await db
+      .from('rooms')
+      .select('*, profiles!rooms_created_by_fkey(username)')
+      .in('id', roomIds)
+      .order('created_at', { ascending: false });
+
+    // Get member counts
+    const { data: memberCounts } = await db
+      .from('room_members')
+      .select('room_id')
+      .in('room_id', roomIds);
+
+    const countMap = {};
+    (memberCounts || []).forEach(m => {
+      countMap[m.room_id] = (countMap[m.room_id] || 0) + 1;
+    });
+
+    container.innerHTML = '<div class="rooms-grid">' +
+      rooms.map(room => `
+        <a class="room-card" href="room.html?id=${room.id}">
+          <div class="room-card-name">${escHtml(room.name)}</div>
+          <div class="room-card-meta">
+            <span>${countMap[room.id] || 1} member${(countMap[room.id] || 1) !== 1 ? 's' : ''}</span>
+            <span>·</span>
+            <span>Created ${formatDate(room.created_at)}</span>
+          </div>
+          <div class="room-card-code">${room.invite_code}</div>
+        </a>
+      `).join('') +
+    '</div>';
+  }
+
+  async function handleCreateRoom() {
+    const name = document.getElementById('room-name').value.trim();
+    const alert = document.getElementById('create-alert');
+    const btn = document.getElementById('create-btn');
+    if (!name) return showAlert(alert, 'Please enter a room name.');
+
+    setLoading(btn, true, 'Create room');
+
+    let invite_code, tries = 0;
+    while (tries < 10) {
+      invite_code = generateInviteCode();
+      const { data } = await db.from('rooms').select('id').eq('invite_code', invite_code).single();
+      if (!data) break;
+      tries++;
+    }
+
+    const { data: room, error } = await db.from('rooms').insert({
+      name, invite_code, created_by: currentUser.id
+    }).select().single();
+
+    if (error) {
+      showAlert(alert, 'Failed to create room. Try again.');
+      setLoading(btn, false, 'Create room');
+      return;
+    }
+
+    // Add creator as member
+    await db.from('room_members').insert({ room_id: room.id, user_id: currentUser.id });
+
+    window.location.href = `room.html?id=${room.id}`;
+  }
+
+  async function handleJoinRoom() {
+    const code = document.getElementById('invite-code').value.trim().toUpperCase();
+    const alert = document.getElementById('join-alert');
+    const btn = document.getElementById('join-btn');
+    if (!code || code.length !== 6) return showAlert(alert, 'Enter a valid 6-character invite code.');
+
+    setLoading(btn, true, 'Join room');
+
+    const { data: room } = await db.from('rooms').select('id, name').eq('invite_code', code).single();
+    if (!room) {
+      showAlert(alert, 'Room not found. Check the invite code.');
+      setLoading(btn, false, 'Join room');
+      return;
+    }
+
+    // Check already a member
+    const { data: existing } = await db.from('room_members')
+      .select('id').eq('room_id', room.id).eq('user_id', currentUser.id).single();
+
+    if (existing) {
+      window.location.href = `room.html?id=${room.id}`;
+      return;
+    }
+
+    await db.from('room_members').insert({ room_id: room.id, user_id: currentUser.id });
+    window.location.href = `room.html?id=${room.id}`;
+  }
+
+  function openCreateModal() {
+    document.getElementById('room-name').value = '';
+    document.getElementById('create-alert').classList.remove('show');
+    document.getElementById('create-modal').classList.add('show');
+    setTimeout(() => document.getElementById('room-name').focus(), 100);
+  }
+
+  function openJoinModal() {
+    document.getElementById('invite-code').value = '';
+    document.getElementById('join-alert').classList.remove('show');
+    document.getElementById('join-modal').classList.add('show');
+    setTimeout(() => document.getElementById('invite-code').focus(), 100);
+  }
+
+  function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+  async function handleLogout() {
+    await db.auth.signOut();
+    window.location.href = '/index.html';
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // Close modal on backdrop click
+  document.querySelectorAll('.modal-backdrop').forEach(el => {
+    el.addEventListener('click', e => { if (e.target === el) el.classList.remove('show'); });
+  });
+
+  init();
+</script>
+</body>
+</html>

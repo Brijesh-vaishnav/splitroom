@@ -1,0 +1,8 @@
+{
+  "buildCommand": "bash build.sh",
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/dashboard", "destination": "/dashboard.html" },
+    { "source": "/room", "destination": "/room.html" }
+  ]
+}

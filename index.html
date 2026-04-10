@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Splitroom — Sign in</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <h1>⬡ Splitroom</h1>
+      <p>Split bills with your people</p>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-login" onclick="switchTab('login')">Sign in</button>
+      <button class="auth-tab" id="tab-signup" onclick="switchTab('signup')">Sign up</button>
+    </div>
+
+    <div id="alert" class="alert"></div>
+
+    <!-- LOGIN FORM -->
+    <div id="form-login">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input class="form-input" type="text" id="login-username" placeholder="your username" autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+      <button class="btn btn-primary btn-full" id="login-btn" onclick="handleLogin()">Sign in</button>
+    </div>
+
+    <!-- SIGNUP FORM -->
+    <div id="form-signup" style="display:none;">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input class="form-input" type="text" id="signup-username" placeholder="choose a username" autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" type="password" id="signup-password" placeholder="at least 6 characters" autocomplete="new-password" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm password</label>
+        <input class="form-input" type="password" id="signup-confirm" placeholder="••••••••" autocomplete="new-password" />
+      </div>
+      <button class="btn btn-primary btn-full" id="signup-btn" onclick="handleSignup()">Create account</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+  // Redirect if already logged in
+  (async () => {
+    const user = await getUser();
+    if (user) window.location.href = '/dashboard.html';
+  })();
+
+  function switchTab(tab) {
+    document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+    document.getElementById('tab-signup').classList.toggle('active', tab === 'signup');
+    document.getElementById('form-login').style.display = tab === 'login' ? 'block' : 'none';
+    document.getElementById('form-signup').style.display = tab === 'signup' ? 'block' : 'none';
+    document.getElementById('alert').classList.remove('show');
+  }
+
+  async function handleLogin() {
+    const username = document.getElementById('login-username').value.trim().toLowerCase();
+    const password = document.getElementById('login-password').value;
+    const alert = document.getElementById('alert');
+    const btn = document.getElementById('login-btn');
+
+    if (!username || !password) return showAlert(alert, 'Please fill in all fields.');
+
+    setLoading(btn, true, 'Sign in');
+
+    // We store users with username@splitroom.internal as fake email
+    const fakeEmail = `${username}@splitroom.internal`;
+    const { error } = await db.auth.signInWithPassword({ email: fakeEmail, password });
+
+    if (error) {
+      showAlert(alert, 'Invalid username or password.');
+      setLoading(btn, false, 'Sign in');
+    } else {
+      window.location.href = '/dashboard.html';
+    }
+  }
+
+  async function handleSignup() {
+    const username = document.getElementById('signup-username').value.trim().toLowerCase();
+    const password = document.getElementById('signup-password').value;
+    const confirm = document.getElementById('signup-confirm').value;
+    const alert = document.getElementById('alert');
+    const btn = document.getElementById('signup-btn');
+
+    if (!username || !password || !confirm) return showAlert(alert, 'Please fill in all fields.');
+    if (username.length < 3) return showAlert(alert, 'Username must be at least 3 characters.');
+    if (!/^[a-z0-9_]+$/.test(username)) return showAlert(alert, 'Username can only contain letters, numbers, and underscores.');
+    if (password.length < 6) return showAlert(alert, 'Password must be at least 6 characters.');
+    if (password !== confirm) return showAlert(alert, 'Passwords do not match.');
+
+    // Check username taken
+    const { data: existing } = await db.from('profiles').select('id').eq('username', username).single();
+    if (existing) return showAlert(alert, 'Username is already taken.');
+
+    setLoading(btn, true, 'Create account');
+
+    const fakeEmail = `${username}@splitroom.internal`;
+    const { error } = await db.auth.signUp({
+      email: fakeEmail,
+      password,
+      options: { data: { username } }
+    });
+
+    if (error) {
+      showAlert(alert, error.message);
+      setLoading(btn, false, 'Create account');
+    } else {
+      showAlert(alert, 'Account created! Signing you in...', 'success');
+      setTimeout(() => window.location.href = '/dashboard.html', 1200);
+    }
+  }
+
+  // Allow Enter key
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const activeForm = document.getElementById('form-login').style.display !== 'none' ? 'login' : 'signup';
+      activeForm === 'login' ? handleLogin() : handleSignup();
+    }
+  });
+</script>
+</body>
+</html>
