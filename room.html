@@ -14,8 +14,7 @@
       background: var(--bg3);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      cursor: pointer;
-      transition: border-color 0.15s;
+      cursor: pointer; transition: border-color 0.15s;
     }
     .split-member-opt:hover { border-color: var(--border2); }
     .split-member-opt.selected { border-color: var(--accent); background: var(--accent-light); }
@@ -24,6 +23,13 @@
     .split-member-opt.selected .split-check { background: var(--accent); border-color: var(--accent); }
     .split-preview { font-size: 12px; color: var(--text3); min-height: 18px; }
     .split-preview span { color: #818cf8; font-weight: 500; }
+    .payment-actions { display: flex; gap: 6px; }
+    .edit-payment { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 5px; }
+    .edit-payment:hover { color: var(--accent); background: var(--accent-light); }
+    .member-remove { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 5px; margin-left: auto; }
+    .member-remove:hover { color: var(--red); background: var(--red-light); }
+    .manage-btn { font-size: 12px; color: var(--text3); background: none; border: 0.5px solid var(--border); border-radius: var(--radius-md); padding: 3px 10px; cursor: pointer; margin-top: 10px; width: 100%; }
+    .manage-btn:hover { background: var(--bg3); color: var(--text); }
   </style>
 </head>
 <body>
@@ -42,19 +48,19 @@
   <div class="loading-screen"><span class="spinner"></span></div>
 </div>
 
-<!-- Add payment modal -->
+<!-- Add/Edit payment modal -->
 <div class="modal-backdrop" id="add-payment-modal">
   <div class="modal">
     <div class="modal-header">
-      <span class="modal-title">Add payment</span>
+      <span class="modal-title" id="payment-modal-title">Add payment</span>
       <button class="modal-close" onclick="closeModal('add-payment-modal')">×</button>
     </div>
     <div id="payment-alert" class="alert"></div>
-    <div class="type-selector">
+    <div class="type-selector" id="type-selector-wrap">
       <label class="type-option selected" id="opt-recurring">
         <input type="radio" name="ptype" value="recurring" checked onchange="selectType('recurring')" />
         <span class="type-option-label">Recurring</span>
-        <span class="type-option-desc">Monthly bill (repeats)</span>
+        <span class="type-option-desc">Monthly bill</span>
       </label>
       <label class="type-option" id="opt-onetime">
         <input type="radio" name="ptype" value="one-time" onchange="selectType('one-time')" />
@@ -77,7 +83,29 @@
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
       <button class="btn btn-secondary" onclick="closeModal('add-payment-modal')">Cancel</button>
-      <button class="btn btn-primary" id="add-pay-btn" onclick="handleAddPayment()">Add payment</button>
+      <button class="btn btn-primary" id="add-pay-btn" onclick="handleSavePayment()">Add payment</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manage members modal -->
+<div class="modal-backdrop" id="members-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Manage members</span>
+      <button class="modal-close" onclick="closeModal('members-modal')">×</button>
+    </div>
+    <div id="members-alert" class="alert"></div>
+
+    <div class="section-label" style="margin-bottom:8px;">Current members</div>
+    <div id="manage-members-list" style="margin-bottom:1.25rem;"></div>
+
+    <hr class="divider" />
+
+    <div class="section-label" style="margin-bottom:8px;">Add member by username</div>
+    <div style="display:flex;gap:8px;">
+      <input class="form-input" type="text" id="add-member-username" placeholder="username" style="flex:1;" />
+      <button class="btn btn-primary" id="add-member-btn" onclick="handleAddMember()">Add</button>
     </div>
   </div>
 </div>
@@ -93,6 +121,7 @@
   let paymentLogs = [];
   let activeTab = 'recurring';
   let selectedSplitMembers = [];
+  let editingPaymentId = null;
   let pollInterval = null;
 
   const roomId = new URLSearchParams(window.location.search).get('id');
@@ -131,6 +160,7 @@
   function renderPage() {
     if (!room) return;
     document.title = `${room.name} — Splitroom`;
+    const isOwner = room.created_by === currentUser.id;
     const filtered = payments.filter(p =>
       activeTab === 'recurring' ? p.type === 'recurring' : p.type === 'one-time'
     );
@@ -155,8 +185,9 @@
             <button class="tab-btn ${activeTab === 'recurring' ? 'active' : ''}" onclick="switchTab('recurring')">Recurring</button>
             <button class="tab-btn ${activeTab === 'one-time' ? 'active' : ''}" onclick="switchTab('one-time')">One-time</button>
           </div>
-          ${filtered.length === 0 ? `<div class="empty-state" style="padding:2rem 0;"><p>No ${activeTab} payments yet.</p></div>`
-          : filtered.map(p => renderPayment(p)).join('')}
+          ${filtered.length === 0
+            ? `<div class="empty-state" style="padding:2rem 0;"><p>No ${activeTab} payments yet.</p></div>`
+            : filtered.map(p => renderPayment(p)).join('')}
         </div>
         <div>
           <div class="section-label">Members</div>
@@ -168,6 +199,9 @@
                 ${m.user_id === currentUser.id ? '<span class="member-you">you</span>' : ''}
               </div>`).join('')}
           </div>
+          <button class="manage-btn" onclick="openMembersModal()">
+            ${isOwner ? '+ Manage members' : '+ Add members'}
+          </button>
         </div>
       </div>`;
   }
@@ -177,6 +211,7 @@
     const splitMembers = members.filter(m => splitWith.includes(m.user_id));
     const per = splitMembers.length > 0 ? Math.round(p.amount / splitMembers.length) : p.amount;
     const month = p.type === 'recurring' ? currentMonth() : null;
+    const canEdit = p.created_by === currentUser.id;
 
     const memberRows = splitMembers.map(m => {
       const log = paymentLogs.find(l =>
@@ -198,8 +233,7 @@
                   onclick="togglePaid('${p.id}','${m.user_id}',${isPaid},'${p.type === 'recurring' ? month : ''}')">
                   ${isPaid ? '✓ Paid' : 'Mark paid'}
                 </button>`
-              : `<span class="badge ${isPaid ? 'badge-paid' : 'badge-unpaid'}">${isPaid ? 'Paid' : 'Pending'}</span>`
-            }
+              : `<span class="badge ${isPaid ? 'badge-paid' : 'badge-unpaid'}">${isPaid ? 'Paid' : 'Pending'}</span>`}
           </div>
         </div>`;
     }).join('');
@@ -226,11 +260,10 @@
               <span style="font-size:11px;color:var(--text3);">÷ ${splitMembers.length}</span>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;">
+          <div class="payment-actions">
             <span class="payment-amount">${formatAmount(p.amount)}</span>
-            ${p.created_by === currentUser.id
-              ? `<button class="delete-payment" onclick="deletePayment('${p.id}')" title="Delete">×</button>`
-              : ''}
+            ${canEdit ? `<button class="edit-payment" onclick="openEditPayment('${p.id}')" title="Edit">✎</button>` : ''}
+            ${canEdit ? `<button class="delete-payment" onclick="deletePayment('${p.id}')" title="Delete">×</button>` : ''}
           </div>
         </div>
         <div class="payment-members">${memberRows}</div>
@@ -262,6 +295,156 @@
     paymentLogs = paymentLogs.filter(l => l.payment_id !== paymentId);
     renderPage();
   }
+
+  // ---- Add / Edit payment ----
+
+  function openAddPayment() {
+    editingPaymentId = null;
+    document.getElementById('payment-modal-title').textContent = 'Add payment';
+    document.getElementById('add-pay-btn').textContent = 'Add payment';
+    document.getElementById('pay-title').value = '';
+    document.getElementById('pay-amount').value = '';
+    document.getElementById('payment-alert').classList.remove('show');
+    document.getElementById('type-selector-wrap').style.display = 'grid';
+    selectType('recurring');
+    document.querySelector('input[name="ptype"][value="recurring"]').checked = true;
+    selectedSplitMembers = members.map(m => m.user_id);
+    renderSplitSelector();
+    document.getElementById('add-payment-modal').classList.add('show');
+    setTimeout(() => document.getElementById('pay-title').focus(), 100);
+  }
+
+  function openEditPayment(paymentId) {
+    const p = payments.find(x => x.id === paymentId);
+    if (!p) return;
+    editingPaymentId = paymentId;
+    document.getElementById('payment-modal-title').textContent = 'Edit payment';
+    document.getElementById('add-pay-btn').textContent = 'Save changes';
+    document.getElementById('pay-title').value = p.title;
+    document.getElementById('pay-amount').value = p.amount;
+    document.getElementById('payment-alert').classList.remove('show');
+    // Hide type selector when editing (can't change type)
+    document.getElementById('type-selector-wrap').style.display = 'none';
+    selectedSplitMembers = p.split_members && p.split_members.length > 0
+      ? p.split_members : members.map(m => m.user_id);
+    renderSplitSelector();
+    document.getElementById('add-payment-modal').classList.add('show');
+    setTimeout(() => document.getElementById('pay-title').focus(), 100);
+  }
+
+  async function handleSavePayment() {
+    const title = document.getElementById('pay-title').value.trim();
+    const amount = parseFloat(document.getElementById('pay-amount').value);
+    const alertEl = document.getElementById('payment-alert');
+    const btn = document.getElementById('add-pay-btn');
+    if (!title) return showAlert(alertEl, 'Please enter a title.');
+    if (!amount || amount <= 0) return showAlert(alertEl, 'Please enter a valid amount.');
+    if (selectedSplitMembers.length === 0) return showAlert(alertEl, 'Select at least one person.');
+
+    setLoading(btn, true, editingPaymentId ? 'Save changes' : 'Add payment');
+
+    if (editingPaymentId) {
+      // Update existing
+      const { error } = await db.from('payments')
+        .update({ title, amount, split_members: selectedSplitMembers })
+        .eq('id', editingPaymentId);
+      if (error) {
+        showAlert(alertEl, 'Failed to update. Try again.');
+        setLoading(btn, false, 'Save changes');
+        return;
+      }
+      const idx = payments.findIndex(p => p.id === editingPaymentId);
+      if (idx !== -1) payments[idx] = { ...payments[idx], title, amount, split_members: selectedSplitMembers };
+    } else {
+      // Insert new
+      const type = document.querySelector('input[name="ptype"]:checked').value;
+      const { data: payment, error } = await db.from('payments').insert({
+        room_id: roomId, title, type, amount,
+        created_by: currentUser.id, split_members: selectedSplitMembers
+      }).select().maybeSingle();
+      if (error) {
+        showAlert(alertEl, 'Failed to add payment. Try again.');
+        setLoading(btn, false, 'Add payment');
+        return;
+      }
+      payments.unshift(payment);
+      activeTab = type === 'recurring' ? 'recurring' : 'one-time';
+    }
+
+    closeModal('add-payment-modal');
+    renderPage();
+  }
+
+  // ---- Manage members ----
+
+  function openMembersModal() {
+    document.getElementById('members-alert').classList.remove('show');
+    document.getElementById('add-member-username').value = '';
+    renderManageMembers();
+    document.getElementById('members-modal').classList.add('show');
+  }
+
+  function renderManageMembers() {
+    const list = document.getElementById('manage-members-list');
+    if (!list) return;
+    const isOwner = room.created_by === currentUser.id;
+    list.innerHTML = members.map(m => `
+      <div class="member-item" style="margin-bottom:8px;">
+        <div class="avatar-sm">${initials(m.profiles.username)}</div>
+        <span style="font-size:13px;">@${escHtml(m.profiles.username)}</span>
+        ${m.user_id === currentUser.id ? '<span class="member-you">you</span>' : ''}
+        ${isOwner && m.user_id !== currentUser.id
+          ? `<button class="member-remove" onclick="handleRemoveMember('${m.user_id}', '${escHtml(m.profiles.username)}')" title="Remove">×</button>`
+          : ''}
+      </div>`).join('');
+  }
+
+  async function handleAddMember() {
+    const username = document.getElementById('add-member-username').value.trim().toLowerCase();
+    const alertEl = document.getElementById('members-alert');
+    const btn = document.getElementById('add-member-btn');
+    if (!username) return showAlert(alertEl, 'Enter a username.');
+
+    setLoading(btn, true, 'Add');
+
+    // Find user by username
+    const { data: profile } = await db.from('profiles').select('id, username').eq('username', username).maybeSingle();
+    if (!profile) {
+      showAlert(alertEl, `User @${username} not found.`);
+      setLoading(btn, false, 'Add');
+      return;
+    }
+
+    // Check already a member
+    const alreadyMember = members.some(m => m.user_id === profile.id);
+    if (alreadyMember) {
+      showAlert(alertEl, `@${username} is already in this room.`);
+      setLoading(btn, false, 'Add');
+      return;
+    }
+
+    // Add via RPC
+    const { error } = await db.from('room_members').insert({ room_id: roomId, user_id: profile.id });
+    if (error) {
+      // Try via RPC if direct insert fails
+      await db.rpc('add_room_member', { rid: roomId, target_user_id: profile.id });
+    }
+
+    showAlert(alertEl, `@${username} added!`, 'success');
+    setLoading(btn, false, 'Add');
+    document.getElementById('add-member-username').value = '';
+    await loadRoom();
+    renderManageMembers();
+  }
+
+  async function handleRemoveMember(userId, username) {
+    if (!confirm(`Remove @${username} from this room?`)) return;
+    await db.rpc('remove_room_member', { rid: roomId, target_user_id: userId });
+    await loadRoom();
+    renderManageMembers();
+  }
+
+  // ---- Split selector ----
 
   function renderSplitSelector() {
     const list = document.getElementById('split-members-list');
@@ -301,51 +484,12 @@
       : '';
   }
 
-  async function handleAddPayment() {
-    const title = document.getElementById('pay-title').value.trim();
-    const amount = parseFloat(document.getElementById('pay-amount').value);
-    const type = document.querySelector('input[name="ptype"]:checked').value;
-    const alertEl = document.getElementById('payment-alert');
-    const btn = document.getElementById('add-pay-btn');
-    if (!title) return showAlert(alertEl, 'Please enter a title.');
-    if (!amount || amount <= 0) return showAlert(alertEl, 'Please enter a valid amount.');
-    if (selectedSplitMembers.length === 0) return showAlert(alertEl, 'Select at least one person.');
-    setLoading(btn, true, 'Add payment');
-    const { data: payment, error } = await db.from('payments').insert({
-      room_id: roomId, title, type, amount,
-      created_by: currentUser.id,
-      split_members: selectedSplitMembers
-    }).select().maybeSingle();
-    if (error) {
-      showAlert(alertEl, 'Failed to add payment. Try again.');
-      setLoading(btn, false, 'Add payment');
-      return;
-    }
-    payments.unshift(payment);
-    activeTab = type === 'recurring' ? 'recurring' : 'one-time';
-    closeModal('add-payment-modal');
-    renderPage();
-  }
-
   function selectType(t) {
     document.getElementById('opt-recurring').classList.toggle('selected', t === 'recurring');
     document.getElementById('opt-onetime').classList.toggle('selected', t === 'one-time');
   }
 
   function switchTab(tab) { activeTab = tab; renderPage(); }
-
-  function openAddPayment() {
-    document.getElementById('pay-title').value = '';
-    document.getElementById('pay-amount').value = '';
-    document.getElementById('payment-alert').classList.remove('show');
-    selectType('recurring');
-    document.querySelector('input[name="ptype"][value="recurring"]').checked = true;
-    selectedSplitMembers = members.map(m => m.user_id);
-    renderSplitSelector();
-    document.getElementById('add-payment-modal').classList.add('show');
-    setTimeout(() => document.getElementById('pay-title').focus(), 100);
-  }
-
   function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 
   async function copyCode() {
