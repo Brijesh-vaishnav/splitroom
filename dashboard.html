@@ -155,9 +155,10 @@
       tries++;
     }
 
-    const { data: room, error } = await db.from('rooms').insert({
-      name, invite_code, created_by: currentUser.id
-    }).select().single();
+    const { data: room, error } = await db.rpc('create_room', {
+      room_name: name,
+      invite_code
+    });
 
     if (error) {
       showAlert(alert, 'Failed to create room. Try again.');
@@ -165,10 +166,8 @@
       return;
     }
 
-    // Add creator as member
-    await db.from('room_members').insert({ room_id: room.id, user_id: currentUser.id });
-
-    window.location.href = `room.html?id=${room.id}`;
+    const roomData = typeof room === 'string' ? JSON.parse(room) : room;
+    window.location.href = `room.html?id=${roomData.id}`;
   }
 
   async function handleJoinRoom() {
